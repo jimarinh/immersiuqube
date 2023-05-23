@@ -60,34 +60,482 @@
         var scene = null;
         var sceneToRender = null;
         var createDefaultEngine = function() { return new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true,  disableWebGL2Support: false}); };
-        const createScene = function () {
+        var hunter;
+var hunterSkeleton;
+var dino;
+
+var playfield = [
+  {t: 5, x: -8, k: 1}, 
+  {t: 15, x: 0, k: 1},
+  {t: 20, x: 5, k: 2},
+  {t: 25, x: -5, k: 1},
+  {t: 34, x: -5, k: 2},
+  {t: 42, x: 15, k: 1},
+  {t: 50, x: 10, k: 1},
+  {t: 53, x: 5, k: 2},
+  {t: 56, x: 5, k: 1},
+  {t: 59, x: -10, k: 2},
+  {t: 62, x: -14, k: 1},
+  {t: 65, x: -8, k: 1},
+  {t: 68, x: 0, k: 2},
+  {t: 74, x: -8, k: 2},
+  {t: 77, x: 0, k:1}
+]; 
+
+const rockDiameter = 2.8;
+var playfieldSprites = [];
+var playfieldStatus = [];
+
+var shieldActive =  0;
+var shield;
+
+var fireBallActive = 0;
+var fireBall;
+
+var jumpActive = 0;
+
+var lifePoints = 3;
+var totalPoints = 0;
+var pointsText;
+
+var timeStamp = 0;
+var currentSprite = -1;
+
+var gameStarted = false;
+var gameOver = false;
+
+var animJump;
+var animFire;
+var animFail;
+
+var createAnimations = function() {
+    //Animación cuando brinca
+    animJump = new BABYLON.Animation("jumpAnim", "position.y", 30, BABYLON.Animation.ANIMATIONTYPE_FLOAT, BABYLON.Animation.ANIMATIONLOOPMODE_CYCLE);
+    var animJumpKeys = []; 
+    animJumpKeys.push({
+        frame: 0,
+        value: 0
+    }); 
+    animJumpKeys.push({
+        frame: 20,
+        value: 3
+    });
+    animJumpKeys.push({
+        frame: 40,
+        value: 0
+    });
+    animJump.setKeys(animJumpKeys);
+
+    //Animación cuando dispara
+    animFire = new BABYLON.Animation("fireballAnim", "position.z", 30, BABYLON.Animation.ANIMATIONTYPE_FLOAT, BABYLON.Animation.ANIMATIONLOOPMODE_CYCLE);
+    var animFireKeys = [];
+    animFireKeys.push({
+        frame: 0,
+        value: 22
+    });
+    animFireKeys.push({
+        frame: 40,
+        value: -10
+    });
+    animFire.setKeys(animFireKeys); 
+
+    //Animación cuando una roca o cazador lo golpea
+    animShield = new BABYLON.Animation("animShield", "material.alpha", 30, BABYLON.Animation.ANIMATIONTYPE_FLOAT, BABYLON.Animation.ANIMATIONLOOPMODE_CYCLE);
+    var animShieldKeys = [];
+    animShieldKeys.push({
+        frame: 0,
+        value: 0
+    });
+    animShieldKeys.push({
+        frame: 10,
+        value: 0.4
+    });
+    animShieldKeys.push({
+        frame: 20,
+        value: 0.4
+    });
+    animShieldKeys.push({
+        frame: 30,
+        value: 0
+    });
+    animShield.setKeys(animShieldKeys); 
+}
+
+// Crea el entorno según el arreglo playfield, donde k=1 es una roca y k=2 es un cazador
+var createField = function ( scene ) {
+    const rockMat = new BABYLON.StandardMaterial("rockMat", scene);
+    rockMat.diffuseColor = new BABYLON.Color3(0.41, 0.43, 0.41, 0.67); 
+    for (let i = 0; i < playfield.length; i++) {
+        //Crea un roca
+        if ( playfield[i].k == 1) {
+            playfieldSprites[i] = BABYLON.MeshBuilder.CreateSphere("rock"+i, {diameterX: rockDiameter, diameterY: 1.7, diameterZ: 2});
+            playfieldSprites[i].material = rockMat; 
+        }
+        //Crea un cazador 
+        if ( playfield[i].k == 2 ) {
+            playfieldSprites[i] = hunter.clone("hunter"+i);
+        }
+        playfieldSprites[i].position.x = playfield[i].x;
+        playfieldSprites[i].position.z = -playfield[i].t * 2;
+        playfieldStatus[i] = playfield[i].k;
+    }
+}
+
+// Crea la esfera que se anima cuando pierde una vida
+var createShield = function ( scene ) {
+    shield = BABYLON.MeshBuilder.CreateSphere("shield", {diameterX: 6, diameterY: 10, diameterZ: 10});
+    shield.position.y = 0;
+    shield.position.z = 26;
+    const shieldMat = new BABYLON.StandardMaterial("shieldMat", scene);
+    shieldMat.alpha = 0.0;
+    shieldMat.emissiveColor = new BABYLON.Color3(0.66, 0.11, 0.71, 0.86);
+    shield.material = shieldMat;
+    shield.animations.push(animShield); 
+}
+
+// Crea la bola de fuego que lanza el dino
+var createFireBall = function ( scene ) {
+    
+    const fireBallMat = new BABYLON.StandardMaterial("fireballMat", scene);
+    fireBallMat.emissiveColor = new BABYLON.Color3(0.9, 0.91, 0.18, 0.86); 
+    fireBall = BABYLON.MeshBuilder.CreateSphere("fireball", {diameterX: 0.3, diameterY: 0.3, diameterZ: 0.3});
+    fireBall.material = fireBallMat;
+    fireBall.position = new BABYLON.Vector3(0, 3.5, 50);
+    fireBall.animations.push(animFire);  
+
+    // Create a particle system
+    const particleSystem = new BABYLON.ParticleSystem("particles", 2000, scene);
+
+    //Texture of each particle
+    particleSystem.particleTexture = new BABYLON.Texture("textures/flare.png", scene);
+
+    // Where the particles come from
+    particleSystem.emitter = fireBall; // the starting object, the emitter
+    particleSystem.minEmitBox = new BABYLON.Vector3(-0.2, 0, 0); // Starting all from
+    particleSystem.maxEmitBox = new BABYLON.Vector3(0.2, 0, 0); // To...
+
+    // Colors of all particles
+    particleSystem.color1 = new BABYLON.Color4(0.98, 1, 0.8);
+    particleSystem.color2 = new BABYLON.Color4(1, 0.6, 0.5);
+    particleSystem.colorDead = new BABYLON.Color4(0, 0, 0.2, 0.0);
+
+    // Size of each particle (random between...
+    particleSystem.minSize = 0.1;
+    particleSystem.maxSize = 0.1;
+
+    // Life time of each particle (random between...
+    particleSystem.minLifeTime = 0.2;
+    particleSystem.maxLifeTime = 1;
+
+    // Emission rate
+    particleSystem.emitRate = 2000;
+
+    // Blend mode : BLENDMODE_ONEONE, or BLENDMODE_STANDARD
+    particleSystem.blendMode = BABYLON.ParticleSystem.BLENDMODE_ONEONE;
+
+    // Set the gravity of all particles
+    particleSystem.gravity = new BABYLON.Vector3(0, 0, 0);
+
+    // Direction of each particle after it has been emitted
+    particleSystem.direction1 = new BABYLON.Vector3(0,-1, 0);
+
+    // Angular speed, in radians
+    particleSystem.minAngularSpeed = 0;
+    particleSystem.maxAngularSpeed = Math.PI;
+
+    // Speed
+    particleSystem.minEmitPower = 1;
+    particleSystem.maxEmitPower = 3;
+    particleSystem.updateSpeed = 0.005;
+
+    // Start the particle system
+    particleSystem.start();
+}
+
+//Crea los botones de la interfaz gráfica
+var buttonTile = function ( buttonName, colorName, x, y, action ) {
+    var buttonX = BABYLON.GUI.Button.CreateSimpleButton("but"+buttonName, buttonName);
+    buttonX.width = "60px"
+    buttonX.height = "30px";
+    buttonX.color = "white";
+    buttonX.cornerRadius = 15;
+    buttonX.background = colorName;
+    buttonX.left = x;
+    buttonX.top = y;
+    buttonX.onPointerUpObservable.add(action);
+    return buttonX;
+}   
+
+//Funciones que se invocan cuando se presiona una tecla 
+
+var pressButtonRight = function ( scene ) {
+    if (!gameStarted) {
+        startGame(scene);
+        return;
+    }
+    dino.position.x -= 0.1;
+    if (dino.position.x < -18) {
+        dino.position.x = -18;
+    }
+}
+
+var pressButtonLeft = function ( scene ) {
+    if (!gameStarted) {
+        startGame(scene);
+        return;
+    }
+    dino.position.x += 0.1;
+    if (dino.position.x > 18) {
+        dino.position.x = 18;
+    }
+}
+
+var pressButtonJump = function ( scene ) {
+    if (!gameStarted) {
+        startGame(scene);
+        return;
+    }
+    if (jumpActive>0) {
+        return;
+    }
+    jumpActive = 80;
+    setTimeout(async () => {
+        const anim = scene.beginAnimation(dino, 0, 40, false);
+        await anim.waitAsync();
+    });
+}
+
+var pressButtonFire = function ( scene ) {
+    if (!gameStarted) {
+        startGame(scene);
+        return;
+    }
+    if (fireBallActive==0) {
+        fireBallActive = 80;
+		gunshot.play( );
+        fireBall.position.x = dino.position.x;
+        setTimeout(async () => {
+            const anim = scene.beginAnimation(fireBall, 0, 40, false);
+            await anim.waitAsync();
+            fireBall.position.z = 50;
+        });
+    }
+}
+
+// Animación del escudo
+var shieldAnimation = function( scene ) {
+    if (shieldActive==0) {
+        shieldActive = 60;
+        shield.position.x = dino.position.x;
+        setTimeout(async () => {
+            const anim = scene.beginAnimation(shield, 0, 30, false);
+            await anim.waitAsync();
+        });
+    }
+}
+
+// Inicia el juego
+var startGame = function ( scene ) {
+    // Create Field
+    createField(scene);
+    // Update variables
+    currentSprite = -1;
+    timeStamp = 0;
+    shieldActive = 0;
+    fireBallActive = 0;
+    jumpActive = 0;
+    lifePoints = 3;
+    totalPoints = 0;
+    pointsText.text = "Points: 0 - Lifes: "+lifePoints;
+    // Update status
+    gameStarted = true;
+    gameOver = false;
+}
+
+
+const createScene = function () {
     const scene = new BABYLON.Scene(engine);
 
-    const camera = new BABYLON.ArcRotateCamera("camera", -Math.PI / 2, Math.PI / 2.5, 50, new BABYLON.Vector3(0, 0, 0));
+    // Connect to device
+    const dsm = new BABYLON.DeviceSourceManager(engine);
+  
+    const camera = new BABYLON.ArcRotateCamera("camera", Math.PI / 2, Math.PI / 2.5, 50, new BABYLON.Vector3(0, 0, 0));
     camera.attachControl(canvas, true);
     const light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(1, 1, 0));
 
+    // Create ground
+    const ground = BABYLON.MeshBuilder.CreateGround("ground", {width: 40, height: 120}, scene);
+    const groundMat = new BABYLON.StandardMaterial("groundMat", scene);
+    groundMat.diffuseColor = new BABYLON.Color3(0.16, 0.53, 0.25, 0.86); 
+    ground.material = groundMat;
+
+    const tile1 = BABYLON.MeshBuilder.CreateBox("box1", {width: 1, height: 1, depth: 1});
+    tile1.position.z = 30;
+
+    const tile2 = BABYLON.MeshBuilder.CreateBox("box2", {width: 1, height: 1, depth: 1});
+    tile2.position.z = 24;
+
+    // Create animations
+    createAnimations();
+
+    // Create fireball
+    createFireBall(scene);
+
+    // Create shield
+    createShield(scene);
+
+    //GUI Elements        
+    var guiElements = BABYLON.GUI.AdvancedDynamicTexture.CreateFullscreenUI("UI");
+
+    pointsText = new BABYLON.GUI.TextBlock();
+    pointsText.text = "Press any key to start";
+    pointsText.color = "white";
+    pointsText.fontSize = 24;
+    pointsText.top = "-45%";
+    guiElements.addControl(pointsText);    
+
+    guiElements.addControl( buttonTile( "W", "blue", "35%", "35%", function() { pressButtonJump(scene); } ) );
+    guiElements.addControl( buttonTile( "A", "blue", "25%", "40%", function() { pressButtonLeft(scene); }) );
+    //guiElements.addControl( buttonTile( "S", "blue", "35%", "45%", function() { pressButtonDown(scene); }) );
+    guiElements.addControl( buttonTile( "D", "blue", "45%", "40%", function() { pressButtonRight(scene); }) );
+    guiElements.addControl( buttonTile( "Space", "red", "35%", "40%", function() { pressButtonFire(scene); }) );
+
+    // Load gun shot sound
+    gunshot = new BABYLON.Sound("gunshot", "sounds/gunshot.wav", scene, null);
+      
     // Hunter
-	BABYLON.SceneLoader.ImportMeshAsync("him", "Dude/", "dude.babylon", scene).then((result) => {
-        var dude = result.meshes[0];
-        dude.scaling = new BABYLON.Vector3(0.125, 0.125, 0.125);
-		dude.rotation.y = Math.PI;
-        scene.beginAnimation(result.skeletons[0], 0, 100, true, 1.0);
+    BABYLON.SceneLoader.ImportMeshAsync("him", "Dude/", "Dude.babylon", scene).then((result) => {
+        hunter = result.meshes[0];
+        hunter.scaling = new BABYLON.Vector3(0.125, 0.125, 0.125);
+        hunter.rotation.y = Math.PI;
+        hunter.position.z = 50;
+        hunterSkeleton = result.skeletons[0];
+        // Create field
+        //createField(scene);
+        // Begin hunter animation
+        scene.beginAnimation(hunterSkeleton, 0, 100, true, 1.0);
     });
-	
+	    
 	// Dino
 	BABYLON.SceneLoader.ImportMesh("", "", "dino.gltf", scene, function(newMeshes){
-		newMeshes[0].scaling = new BABYLON.Vector3(2, 2, 2);
+		dino = newMeshes[0]; 
+        dino.position.z = 28;
+        dino.scaling = new BABYLON.Vector3(1, 1, 1);
+        dino.animations.push(animJump);
+
+        gameStarted = false;
+        gameOver = false;
+
+        // Main game loop
+        scene.registerBeforeRender(function () {
+
+            if (gameStarted && !gameOver) {
+                for(let i=0; i<playfieldSprites.length; i++) {
+                    // Update sprintes positions that are in view range
+                    if ( playfieldSprites[i].position.z < 50 ) {
+                        playfieldSprites[i].position.z += 0.05;
+                    }
+                    // Update currentSprite
+                    if ( (playfieldSprites[i].position.z > 24) && (playfieldSprites[i].position.z <30) ) {
+                        currentSprite = i;
+                    }
+                    // Check if the fireball bumps a hunter
+                    if ( (fireBallActive>0) && (playfieldStatus[i] == 2) &&
+                        (fireBall.position.z > playfieldSprites[i].position.z-1) && 
+                        (fireBall.position.z < playfieldSprites[i].position.z+1) &&
+                        (fireBall.position.x > playfieldSprites[i].position.x-1) &&
+                        (fireBall.position.x < playfieldSprites[i].position.x+1) )
+                        {
+                            playfieldSprites[i].scaling.x = 0.001;
+                            playfieldSprites[i].scaling.y = 0.001;
+                            playfieldSprites[i].scaling.z = 0.001;
+                            playfieldStatus[i] = 0;
+                            fireBallActive = 0;
+                            totalPoints++;
+                            pointsText.text = "Points: " + totalPoints + " Lifes: " + lifePoints;
+                        }
+                } 
+
+                // Check game over
+                if ( (currentSprite == playfieldSprites.length-1) && (playfieldSprites[currentSprite].position.z > 50 ) ) {
+                    pointsText.text = "Game Over. Points: "+totalPoints;
+                    gameStarted = false;
+                    gameOver = true;
+                }
+
+                // Check if dino bumps a rock or hunter or jumps a rock
+                if ( (currentSprite>=0) && (currentSprite < playfieldSprites.length) ) {
+                    // check if the current sprite is inside the dino position
+                    if ( (playfieldSprites[currentSprite].position.z > 24) && 
+                        (playfieldSprites[currentSprite].position.z < 30) &&
+                        (dino.position.x > (playfieldSprites[currentSprite].position.x-rockDiameter/2)) &&
+                        (dino.position.x < (playfieldSprites[currentSprite].position.x+rockDiameter/2))
+                        ) {
+                        if ( (playfieldStatus[currentSprite] == 1) && (jumpActive>0) ) {
+                            playfieldStatus[currentSprite] = 0;
+                            totalPoints++;
+                        } 
+                        if ( (playfieldStatus[currentSprite] == 1) && (jumpActive==0) && (shieldActive==0) ) {
+                            shieldAnimation(scene);
+                            playfieldStatus[currentSprite] = 0;
+                            lifePoints--;
+                        }
+                        if ( (playfieldStatus[currentSprite] == 2) && (shieldActive==0) ) {
+                            shieldAnimation(scene);
+                            playfieldStatus[currentSprite] = 0;
+                            lifePoints--;
+                        } 
+                        if (lifePoints == 0) {
+                            gameOver = true;
+                            pointsText.text = "Game Over\n";
+                        } else {
+                            pointsText.text = "";
+                        }
+                        pointsText.text = pointsText.text+"Points: " + totalPoints + " Lifes: " + lifePoints;
+                    }
+                } 
+                timeStamp++;
+                if (jumpActive>0) {
+                    jumpActive--;
+                }
+                if (fireBallActive>0) {
+                    fireBallActive--;
+                }
+                if (shieldActive>0) {
+                    shieldActive--;
+                }
+            }
+
+            // Read keyboard
+            if (dsm.getDeviceSource(BABYLON.DeviceType.Keyboard)) {
+                if (dsm.getDeviceSource(BABYLON.DeviceType.Keyboard).getInput(65) == 1) {
+                   pressButtonLeft(scene);
+                }
+                if (dsm.getDeviceSource(BABYLON.DeviceType.Keyboard).getInput(83) == 1) {
+                    //pressButtonDown(scene);    
+                }
+                if (dsm.getDeviceSource(BABYLON.DeviceType.Keyboard).getInput(68) == 1) {
+                    pressButtonRight(scene);
+                }
+                if (dsm.getDeviceSource(BABYLON.DeviceType.Keyboard).getInput(87) == 1) {
+                    pressButtonJump(scene);
+                }
+                if (dsm.getDeviceSource(BABYLON.DeviceType.Keyboard).getInput(32) == 1) {
+                    pressButtonFire(scene);
+                }
+            }
+            /*
+            mydevice.read(function(str){ 
+                const obj = JSON.parse(str,	function (key, value) {
+                if ( (key == "fire") && (value == "1")) {
+                    pressButtonFire(scene);
+                }
+                });
+            });
+            */
+        });
+
 	});
-	
-/*
-    var layer = new BABYLON.Layer("background", null, scene, true);
-    BABYLON.VideoTexture.CreateFromWebCam(scene, function (videoTexture) {
-        videoTexture.vScale = -1.0;
-        videoTexture.uScale = canvas.width / canvas.height * videoTexture.getSize().height / videoTexture.getSize().width;
-        layer.texture = videoTexture;
-    }, { maxWidth: 640, maxHeight: 480, deviceId: 1 });
-*/
     return scene;
 
 };
