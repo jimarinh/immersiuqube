@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+
+        <title>Babylon.js sample code</title>
+
+        <!-- Babylon.js -->
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/dat-gui/0.6.2/dat.gui.min.js"></script>
+        <script src="https://assets.babylonjs.com/generated/Assets.js"></script>
+        <script src="https://cdn.babylonjs.com/ammo.js"></script>
+        <script src="https://cdn.babylonjs.com/havok/HavokPhysics_umd.js"></script>
+        <script src="https://cdn.babylonjs.com/cannon.js"></script>
+        <script src="https://cdn.babylonjs.com/Oimo.js"></script>
+        <script src="https://cdn.babylonjs.com/earcut.min.js"></script>
+        <script src="https://cdn.babylonjs.com/babylon.js"></script>
+        <script src="https://cdn.babylonjs.com/materialsLibrary/babylonjs.materials.min.js"></script>
+        <script src="https://cdn.babylonjs.com/proceduralTexturesLibrary/babylonjs.proceduralTextures.min.js"></script>
+        <script src="https://cdn.babylonjs.com/postProcessesLibrary/babylonjs.postProcess.min.js"></script>
+        <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.js"></script>
+        <script src="https://cdn.babylonjs.com/serializers/babylonjs.serializers.min.js"></script>
+        <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
+        <script src="https://cdn.babylonjs.com/inspector/babylon.inspector.bundle.js"></script>
+
+        <style>
+            html, body {
+                overflow: hidden;
+                width: 100%;
+                height: 100%;
+                margin: 0;
+                padding: 0;
+            }
+
+            #renderCanvas {
+                width: 100%;
+                height: 100%;
+                touch-action: none;
+            }
+            
+            #canvasZone {
+                width: 100%;
+                height: 100%;
+            }
+        </style>
+    </head>
+<body>
+    <div>
+		<div><button id="connectDevice" name="connectDevice">Connect BT Device</button></div>
+	    <div id="canvasZone"><canvas id="renderCanvas"></canvas></div>
+	</div>
+	<script src="btdevice.js"></script>
+    <script>
+		const mydevice = new BTDevice();
+		window.onload = function() {
+			// Connect / Disconnect button
+			connectDevice.addEventListener("click", () => {
+				mydevice.init( function(status){
+					if (status) {
+						connectDevice.innerHTML = "Disconnect BT Device";
+					} else {
+						connectDevice.innerHTML = "Connect BT Device";
+					}
+				});
+			});
+		}
+    </script>
+    <script>
+        var canvas = document.getElementById("renderCanvas");
+
+        var startRenderLoop = function (engine, canvas) {
+            engine.runRenderLoop(function () {
+                if (sceneToRender && sceneToRender.activeCamera) {
+                    sceneToRender.render();
+                }
+            });
+        }
+
+        var engine = null;
+        var scene = null;
+        var sceneToRender = null;
+        var createDefaultEngine = function() { return new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true,  disableWebGL2Support: false}); };
+const fps = 60; //Frames per second
+var timeStamp = 0;
+
+var ball;           // ball
+var ballPos;        // pointer to the ball position
+var ballForce;      // force bar
+
+const maxBalls = 5; //Maxium number of balls
+var numBalls = 5;   //Number of ball left
+var ballStatus = 0; 
+
+const skeeball_holes = [
+    {x: 0, y: -1.9, p: 50},
+    {x: 0, y: -3.8, p: 40},
+    {x: 0, y: -5.8, p: 30},
+    {x: 0, y: -8.1, p: 20},
+    {x: 0, y: -10.1, p: 10},
+    {x: 4.05, y: -1.35, p: 100},
+    {x: -4.05, y: -1.35, p: 100}
+];
+const holediameter = 1.35;
+const skeeball_box_pos = -10;
+const skeeball_box_angle = -Math.PI/4;
+
+const g = 10;       //Parameters to perform realistic ball animation
+const minv0z = 12;  
+const maxv0z = 25;
+const minv0y = 14.5;
+const maxv0y = 18;
+var v0z = minv0z;
+var v0y = minv0y;
+var t0;
+const z0 = 35;
+const y0 = 0.1;
+
+var totalPoints = 0;
+var pointsText;
+
+var gameStarted = false;
+var gameOver = false;
+
+
+//Crea los botones de la interfaz gráfica
+var buttonTile = function ( buttonName, colorName, x, y, action ) {
+    var buttonX = BABYLON.GUI.Button.CreateSimpleButton("but"+buttonName, buttonName);
+    buttonX.width = "60px"
+    buttonX.height = "30px";
+    buttonX.color = "white";
+    buttonX.cornerRadius = 15;
+    buttonX.background = colorName;
+    buttonX.left = x;
+    buttonX.top = y;
+    buttonX.onPointerUpObservable.add(action);
+    return buttonX;
+}   
+
+//Funciones que se invocan cuando se presiona una tecla 
+
+var pressButtonRight = function ( scene ) {
+    if (!gameStarted) {
+        startGame(scene);
+        return;
+    }
+    ballPos.position.x -= 0.1;
+    if (ballPos.position.x < -5) {
+        ballPos.position.x = -5;
+    }
+}
+
+var pressButtonLeft = function ( scene ) {
+    if (!gameStarted) {
+        startGame(scene);
+        return;
+    }
+    ballPos.position.x += 0.1;
+    if (ballPos.position.x > 5) {
+        ballPos.position.x = 5;
+    }
+}
+
+var pressButtonForceUp = function ( scene ) {
+    if (!gameStarted) {
+        startGame(scene);
+        return;
+    }
+    var scale = ballForce.scaling.y + 0.02;
+    if (scale > 1.0) {
+        scale = 1.0;
+    } 
+    ballForce.scaling.y = scale;
+    ballForce.position.x = 5 - 5*scale;
+}
+
+var pressButtonForceDown = function ( scene ) {
+    if (!gameStarted) {
+        startGame(scene);
+        return;
+    }
+    var scale = ballForce.scaling.y - 0.02;
+    if (scale <= 0.02) {
+        scale = 0.02;
+    } 
+    ballForce.scaling.y = scale;
+    ballForce.position.x = 5 - 5*scale;
+}
+
+var pressButtonFire = function ( scene ) {
+    if (!gameStarted) {
+        startGame(scene);
+        return;
+    }
+    if (ballStatus==0) {
+        ballStatus = 1; //Start ball movement 
+        ball.position.x =  ballPos.position.x;
+        ball.position.y = y0;
+        ball.position.z = z0;
+        v0z = ballForce.scaling.y * (maxv0z-minv0z) + minv0z; 
+        v0y = ballForce.scaling.y * (maxv0y-minv0y) + minv0y;
+        t0 = timeStamp/fps;
+        numBalls--;
+    }
+}
+
+var showScore = function () {
+    pointsText.text = "Balls left: "+numBalls+" - Points: "+totalPoints;
+}
+
+// Inicia el juego
+var startGame = function ( scene ) {
+    numBalls = maxBalls;
+    ballStatus = 0; 
+    // Update variables
+    timeStamp = 0;
+    totalPoints = 0;
+    showScore();
+    // Update status
+    gameStarted = true;
+    gameOver = false;
+}
+
+
+const createScene = function () {
+    const scene = new BABYLON.Scene(engine);
+
+    // Connect to device
+    const dsm = new BABYLON.DeviceSourceManager(engine);
+  
+    const camera = new BABYLON.ArcRotateCamera("camera", Math.PI / 2, Math.PI / 2.5, 50, new BABYLON.Vector3(0, 0, 0));
+    camera.attachControl(canvas, true);
+    const light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(1, 1, 0));
+
+    // Create ground
+    const ground = BABYLON.MeshBuilder.CreateGround("ground", {width: 40, height: 120}, scene);
+    const groundMat = new BABYLON.StandardMaterial("groundMat", scene);
+    groundMat.diffuseColor = new BABYLON.Color3(0.16, 0.53, 0.25, 0.86); 
+    ground.material = groundMat;
+
+    // Create Skee-ball box
+    var faceUV = new Array(6); //Use faceUV to map the skee ball image only to the front face of the box
+    for (var i = 0; i < 6; i++) {
+        faceUV[i] = new BABYLON.Vector4(0, 0, 0, 0);
+    }
+    faceUV[0] = new BABYLON.Vector4(1, 1, 0, 0); 
+    const skeeball_box = BABYLON.MeshBuilder.CreateBox("skeeballbox", {width: 13.8, height:20, depth:0.5, faceUV: faceUV});
+    skeeball_box.position.z = skeeball_box_pos;
+    skeeball_box.position.y = 10*Math.cos(skeeball_box_angle);
+    skeeball_box.rotation.x = skeeball_box_angle;
+    
+    const skeeballMat = new BABYLON.StandardMaterial("skeeballMat", scene);
+    skeeballMat.diffuseTexture = new BABYLON.Texture("textures/skeeball.png", scene);
+    skeeball_box.material = skeeballMat;
+
+    // Create a pointer to the ball position
+    ballPos = BABYLON.MeshBuilder.CreateCylinder("bpos", {diameterTop: 0, diameterBottom:1, height:2});
+    ballPos.position.z = 25;
+    ballPos.position.y = 0.5;
+    ballPos.rotation.x = -Math.PI/2;
+    const phMat = new BABYLON.StandardMaterial("bposMat", scene);
+    phMat.diffuseColor = new BABYLON.Color3(0.85, 0.02, 0.02);
+    ballPos.material = phMat;
+    
+    // Create the force bar
+    ballForce = BABYLON.MeshBuilder.CreateCylinder("ballForce", {diameterTop: 0.5, diameterBottom:0.5, height:10});
+    ballForce.position.x = 0;
+    ballForce.position.y = 0.25;
+    ballForce.position.z = 27;
+    ballForce.rotation.z = -Math.PI/2;
+    const forceMat = new BABYLON.StandardMaterial("forceMat", scene);
+    forceMat.diffuseColor = new BABYLON.Color3(0.85, 0.56, 0.02);
+    ballForce.material = forceMat;
+    ballForce.scaling.y = 0.05;
+    ballForce.position.x = 5 - 0.05*5;
+
+    // Create ball
+    ball = BABYLON.MeshBuilder.CreateSphere("ball", {diameter: 1.5});
+    ball.position.z = z0;
+    
+    // Debugging code to check the hole positions
+    /*for(let i=0; i<skeeball_holes.length; i++){
+        //Transform hole positions to real world positions
+        var hx = skeeball_holes[i].x;
+        var hy = skeeball_box.position.y + skeeball_holes[i].y*Math.cos(skeeball_box_angle); 
+        var hz = skeeball_box.position.z + skeeball_holes[i].y*Math.sin(skeeball_box_angle);
+        var hole = BABYLON.MeshBuilder.CreateSphere("h"+i, {diameter:holediameter});
+        hole.position.x = hx;
+        hole.position.y = hy;
+        hole.position.z = hz;
+    }*/
+    
+    // GUI Elements        
+    var guiElements = BABYLON.GUI.AdvancedDynamicTexture.CreateFullscreenUI("UI");
+
+    pointsText = new BABYLON.GUI.TextBlock();
+    pointsText.text = "Press any key to start";
+    pointsText.color = "white";
+    pointsText.fontSize = 24;
+    pointsText.top = "-45%";
+    guiElements.addControl(pointsText);    
+
+    guiElements.addControl( buttonTile( "W", "blue", "35%", "35%", function() { pressButtonForceUp(scene); } ) );
+    guiElements.addControl( buttonTile( "A", "blue", "25%", "40%", function() { pressButtonLeft(scene); }) );
+    guiElements.addControl( buttonTile( "S", "blue", "35%", "45%", function() { pressButtonForceDown(scene); }) );
+    guiElements.addControl( buttonTile( "D", "blue", "45%", "40%", function() { pressButtonRight(scene); }) );
+    guiElements.addControl( buttonTile( "Space", "red", "35%", "40%", function() { pressButtonFire(scene); }) );
+	
+    gameStarted = false;
+    gameOver = false;
+
+    // Main game loop
+    scene.registerBeforeRender(function () {
+        
+        if (gameStarted && !gameOver) {
+            // Display time & score
+            showScore();
+            
+            // Update ball position if it has been fired
+            if (ballStatus == 1) {
+                var t = (timeStamp/fps) - t0;
+                ball.position.z = z0 - v0z*t;
+                ball.position.y = y0 + v0y*t - 0.5*g*t*t;
+                if (ball.position.y <= 0) {
+                    ballStatus = 0;
+                }
+                //check if the ball hits an skee ball hole
+                for(let i=0; i<skeeball_holes.length; i++){
+                    //Transform hole positions to real world positions
+                    var hx = skeeball_holes[i].x;
+                    var hy = skeeball_box.position.y + skeeball_holes[i].y*Math.cos(skeeball_box_angle); 
+                    var hz = skeeball_box.position.z + skeeball_holes[i].y*Math.sin(skeeball_box_angle);
+                    var r  = holediameter/3;
+                    if ((Math.abs(ball.position.x-hx) < r) &&
+                        (Math.abs(ball.position.y-hy) < r) &&
+                        (Math.abs(ball.position.z-hz) < r) ) 
+                        {
+                            totalPoints += skeeball_holes[i].p;
+                            ballStatus = 0;
+                        }
+                }
+            }
+
+            //Check if game over
+            if ( (ballStatus==0) && (numBalls==0) ) {
+                pointsText.text = "Game Over - Points: " + totalPoints;
+                gameStarted = false;
+                gameOver = true;
+            }
+            timeStamp++;
+        }
+
+        // Read keyboard
+        if (dsm.getDeviceSource(BABYLON.DeviceType.Keyboard)) {
+            if (dsm.getDeviceSource(BABYLON.DeviceType.Keyboard).getInput(65) == 1) {
+                pressButtonLeft(scene);
+            }
+            if (dsm.getDeviceSource(BABYLON.DeviceType.Keyboard).getInput(83) == 1) {
+                pressButtonForceDown(scene);    
+            }
+            if (dsm.getDeviceSource(BABYLON.DeviceType.Keyboard).getInput(68) == 1) {
+                pressButtonRight(scene);
+            }
+            if (dsm.getDeviceSource(BABYLON.DeviceType.Keyboard).getInput(87) == 1) {
+                pressButtonForceUp(scene);
+            }
+            if (dsm.getDeviceSource(BABYLON.DeviceType.Keyboard).getInput(32) == 1) {
+                if (ballStatus==0) {
+                    pressButtonFire(scene);
+                }
+            }   
+        }
+        /*
+        mydevice.read(function(str){ 
+            const obj = JSON.parse(str,	function (key, value) {
+            if ( (key == "fire") && (value == "1")) {
+                pressButtonFire(scene);
+            }
+            });
+        });*/
+        
+    });
+    return scene;
+};
+
+                window.initFunction = async function() {
+                    
+                    
+                    
+                    var asyncEngineCreation = async function() {
+                        try {
+                        return createDefaultEngine();
+                        } catch(e) {
+                        console.log("the available createEngine function failed. Creating the default engine instead");
+                        return createDefaultEngine();
+                        }
+                    }
+
+                    window.engine = await asyncEngineCreation();
+        if (!engine) throw 'engine should not be null.';
+        startRenderLoop(engine, canvas);
+        window.scene = createScene();};
+        initFunction().then(() => {sceneToRender = scene                    
+        });
+
+        // Resize
+        window.addEventListener("resize", function () {
+            engine.resize();
+        });
+    </script>
+</body>
+</html>
